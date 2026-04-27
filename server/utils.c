@@ -16,11 +16,19 @@ typedef struct {
 } Voter;
 
 int is_id_registered(const char* id, const char* filename) {
+    printf("[TRACE] is_id_registered: Opening '%s' to check for ID '%s' (PID: %d)...\n", filename, id, getpid());
+    fflush(stdout);
     FILE *fp = fopen(filename, "rb");
-    if (!fp) return 0;
+    if (!fp) {
+        printf("[TRACE] is_id_registered: File '%s' does not exist yet. Returning not registered.\n", filename);
+        fflush(stdout);
+        return 0;
+    }
     
-    flock(fileno(fp), LOCK_SH); // Shared lock for reading
-    printf("[TRACE] Checking ID existence with SHARED lock on %s...\n", filename);
+    printf("[TRACE] is_id_registered: Acquiring SHARED lock on %s...\n", filename);
+    fflush(stdout);
+    flock(fileno(fp), LOCK_SH);
+    printf("[TRACE] is_id_registered: SHARED lock acquired. Reading records to search for ID '%s'...\n", id);
     fflush(stdout);
 
     int result = 0;
@@ -35,29 +43,55 @@ int is_id_registered(const char* id, const char* filename) {
             if (strcmp(temp.student_id, id) == 0) { result = 1; break; }
         }
     }
+    printf("[TRACE] is_id_registered: Search complete. ID '%s' %s in '%s'.\n", id, result ? "FOUND" : "NOT FOUND", filename);
+    fflush(stdout);
+    printf("[TRACE] is_id_registered: Releasing SHARED lock on %s.\n", filename);
+    fflush(stdout);
     flock(fileno(fp), LOCK_UN);
     fclose(fp); 
     return result;
 }
 
 int read_record(const char *filename, long index, void *out, size_t record_size) {
+    printf("[TRACE] read_record: Opening '%s' to read record at index %ld (record size: %zu) (PID: %d)...\n", filename, index, record_size, getpid());
+    fflush(stdout);
     FILE *f = fopen(filename, "rb");
-    if (f == NULL) return 0;
+    if (f == NULL) {
+        printf("[TRACE] read_record: Failed to open '%s'.\n", filename);
+        fflush(stdout);
+        return 0;
+    }
 
+    printf("[TRACE] read_record: Seeking to byte offset %ld...\n", index * record_size);
+    fflush(stdout);
     fseek(f, index * record_size, SEEK_SET);
+    printf("[TRACE] read_record: Reading %zu bytes from disk...\n", record_size);
+    fflush(stdout);
     int result = fread(out, record_size, 1, f) == 1;
+    printf("[TRACE] read_record: Read %s.\n", result ? "successful" : "failed");
+    fflush(stdout);
     fclose(f);
     return result;
 }
 
 int append_record(const char *filename, void *record, size_t record_size) {
+    printf("[TRACE] append_record: Opening '%s' for appending (record size: %zu) (PID: %d)...\n", filename, record_size, getpid());
+    fflush(stdout);
     FILE *f = fopen(filename, "ab+");
-    if (f == NULL) return -1;
+    if (f == NULL) {
+        printf("[TRACE] append_record: Failed to open '%s'!\n", filename);
+        fflush(stdout);
+        return -1;
+    }
 
     fseek(f, 0, SEEK_END);
     int new_id = (ftell(f) / record_size) + 1;
+    printf("[TRACE] append_record: Appending new record (new ID: %d). Writing %zu bytes to disk...\n", new_id, record_size);
+    fflush(stdout);
 
     fwrite(record, record_size, 1, f);
+    printf("[TRACE] append_record: Record written successfully to '%s'.\n", filename);
+    fflush(stdout);
     fclose(f);
     return new_id;
 }
@@ -86,5 +120,6 @@ void log_event(const char *level, const char *format, ...) {
         fclose(log_file);
     } else {
         printf("[!] CRITICAL: Could not open server.log for writing!\n");
+        fflush(stdout);
     }
 }
