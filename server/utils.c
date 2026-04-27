@@ -5,6 +5,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include "../shared/candidate.h"
+#include <unistd.h>
+#include <sys/file.h>
 
 typedef struct {
     char student_id[15];
@@ -13,6 +15,30 @@ typedef struct {
     int  votes_cast;
 } Voter;
 
+int is_id_registered(const char* id, const char* filename) {
+    FILE *fp = fopen(filename, "rb");
+    if (!fp) return 0;
+    
+    flock(fileno(fp), LOCK_SH); // Shared lock for reading
+    printf("[TRACE] Checking ID existence with SHARED lock on %s...\n", filename);
+    fflush(stdout);
+
+    int result = 0;
+    if (strcmp(filename, "voters.dat") == 0) {
+        Voter temp;
+        while (fread(&temp, sizeof(Voter), 1, fp)) {
+            if (strcmp(temp.student_id, id) == 0) { result = 1; break; }
+        }
+    } else {
+        Candidate temp;
+        while (fread(&temp, sizeof(Candidate), 1, fp)) {
+            if (strcmp(temp.student_id, id) == 0) { result = 1; break; }
+        }
+    }
+    flock(fileno(fp), LOCK_UN);
+    fclose(fp); 
+    return result;
+}
 
 int read_record(const char *filename, long index, void *out, size_t record_size) {
     FILE *f = fopen(filename, "rb");
@@ -34,26 +60,6 @@ int append_record(const char *filename, void *record, size_t record_size) {
     fwrite(record, record_size, 1, f);
     fclose(f);
     return new_id;
-}
-
-
-int is_id_registered(const char* id, const char* filename) {
-    FILE *fp = fopen(filename, "rb");
-    if (!fp) return 0;
-    
-    if (strcmp(filename, "voters.dat") == 0) {
-        Voter temp;
-        while (fread(&temp, sizeof(Voter), 1, fp)) {
-            if (strcmp(temp.student_id, id) == 0) { fclose(fp); return 1; }
-        }
-    } else {
-        Candidate temp;
-        while (fread(&temp, sizeof(Candidate), 1, fp)) {
-            if (strcmp(temp.student_id, id) == 0) { fclose(fp); return 1; }
-        }
-    }
-    fclose(fp); 
-    return 0;
 }
 
 void log_event(const char *level, const char *format, ...) {
