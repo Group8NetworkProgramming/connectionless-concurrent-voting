@@ -1,5 +1,5 @@
-#ifndef VOTER_H
-#define VOTER_H
+#ifndef PROTOCOL_H
+#define PROTOCOL_H
 
 #include <stddef.h> 
 

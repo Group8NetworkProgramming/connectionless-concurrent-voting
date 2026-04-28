@@ -1,34 +1,29 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "server.h"
-#include <time.h>   
 #include <string.h>
 #include <stdarg.h>
-#include "../shared/candidate.h"
+#include <time.h>
 #include <unistd.h>
 #include <sys/file.h>
-
-typedef struct {
-    char student_id[15];
-    char name[50];
-    int  has_voted; 
-    int  votes_cast;
-} Voter;
+#include "../shared/voter.h"     // Included first
+#include "../shared/candidate.h" // Included first
+#include "server.h"
 
 int is_id_registered(const char* id, const char* filename) {
-    printf("[TRACE] is_id_registered: Opening '%s' to check for ID '%s' (PID: %d)...\n", filename, id, getpid());
+    printf("[TRACE] is_id_registered (PID: %d): Opening '%s' to check for ID '%s'...\n", getpid(), filename, id);
     fflush(stdout);
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
-        printf("[TRACE] is_id_registered: File '%s' does not exist yet. Returning not registered.\n", filename);
+        printf("[TRACE] is_id_registered (PID: %d): File '%s' does not exist yet. Returning not registered.\n", getpid(), filename);
         fflush(stdout);
         return 0;
     }
-    
-    printf("[TRACE] is_id_registered: Acquiring SHARED lock on %s...\n", filename);
+
+    // --- Acquire shared lock for reading ---
+    printf("[TRACE] is_id_registered (PID: %d): Acquiring SHARED lock on '%s'...\n", getpid(), filename);
     fflush(stdout);
     flock(fileno(fp), LOCK_SH);
-    printf("[TRACE] is_id_registered: SHARED lock acquired. Reading records to search for ID '%s'...\n", id);
+    printf("[TRACE] is_id_registered (PID: %d): SHARED lock acquired. Scanning records...\n", getpid());
     fflush(stdout);
 
     int result = 0;
@@ -43,56 +38,89 @@ int is_id_registered(const char* id, const char* filename) {
             if (strcmp(temp.student_id, id) == 0) { result = 1; break; }
         }
     }
-    printf("[TRACE] is_id_registered: Search complete. ID '%s' %s in '%s'.\n", id, result ? "FOUND" : "NOT FOUND", filename);
+
+    printf("[TRACE] is_id_registered (PID: %d): ID '%s' %s in '%s'.\n",
+           getpid(), id, result ? "FOUND" : "NOT FOUND", filename);
     fflush(stdout);
-    printf("[TRACE] is_id_registered: Releasing SHARED lock on %s.\n", filename);
+
+    // --- Release lock ---
+    printf("[TRACE] is_id_registered (PID: %d): Releasing SHARED lock on '%s'.\n", getpid(), filename);
     fflush(stdout);
     flock(fileno(fp), LOCK_UN);
-    fclose(fp); 
+    fclose(fp);
     return result;
 }
 
 int read_record(const char *filename, long index, void *out, size_t record_size) {
-    printf("[TRACE] read_record: Opening '%s' to read record at index %ld (record size: %zu) (PID: %d)...\n", filename, index, record_size, getpid());
+    printf("[TRACE] read_record (PID: %d): Opening '%s' to read record at index %ld (record size: %zu)...\n",
+           getpid(), filename, index, record_size);
     fflush(stdout);
     FILE *f = fopen(filename, "rb");
     if (f == NULL) {
-        printf("[TRACE] read_record: Failed to open '%s'.\n", filename);
+        printf("[TRACE] read_record (PID: %d): FAILED to open '%s'.\n", getpid(), filename);
         fflush(stdout);
         return 0;
     }
 
-    printf("[TRACE] read_record: Seeking to byte offset %ld...\n", index * record_size);
+    // --- Acquire shared lock for reading ---
+    printf("[TRACE] read_record (PID: %d): Acquiring SHARED lock on '%s'...\n", getpid(), filename);
+    fflush(stdout);
+    flock(fileno(f), LOCK_SH);
+    printf("[TRACE] read_record (PID: %d): SHARED lock acquired.\n", getpid());
+    fflush(stdout);
+
+    printf("[TRACE] read_record (PID: %d): Seeking to byte offset %ld...\n", getpid(), index * record_size);
     fflush(stdout);
     fseek(f, index * record_size, SEEK_SET);
-    printf("[TRACE] read_record: Reading %zu bytes from disk...\n", record_size);
+
+    printf("[TRACE] read_record (PID: %d): File Read — reading %zu bytes from disk...\n", getpid(), record_size);
     fflush(stdout);
     int result = fread(out, record_size, 1, f) == 1;
-    printf("[TRACE] read_record: Read %s.\n", result ? "successful" : "failed");
+    printf("[TRACE] read_record (PID: %d): Read %s.\n", getpid(), result ? "successful" : "failed");
     fflush(stdout);
+
+    // --- Release lock ---
+    printf("[TRACE] read_record (PID: %d): Releasing SHARED lock on '%s'.\n", getpid(), filename);
+    fflush(stdout);
+    flock(fileno(f), LOCK_UN);
     fclose(f);
     return result;
 }
 
 int append_record(const char *filename, void *record, size_t record_size) {
-    printf("[TRACE] append_record: Opening '%s' for appending (record size: %zu) (PID: %d)...\n", filename, record_size, getpid());
+    printf("[TRACE] append_record (PID: %d): Opening '%s' for appending (record size: %zu)...\n",
+           getpid(), filename, record_size);
     fflush(stdout);
     FILE *f = fopen(filename, "ab+");
     if (f == NULL) {
-        printf("[TRACE] append_record: Failed to open '%s'!\n", filename);
+        printf("[TRACE] append_record (PID: %d): FAILED to open '%s'!\n", getpid(), filename);
         fflush(stdout);
         return -1;
     }
 
+    // --- Acquire exclusive lock for writing ---
+    printf("[TRACE] append_record (PID: %d): Acquiring EXCLUSIVE lock on '%s'...\n", getpid(), filename);
+    fflush(stdout);
+    flock(fileno(f), LOCK_EX);
+    printf("[TRACE] append_record (PID: %d): EXCLUSIVE lock acquired.\n", getpid());
+    fflush(stdout);
+
     fseek(f, 0, SEEK_END);
     int new_id = (ftell(f) / record_size) + 1;
-    printf("[TRACE] append_record: Appending new record (new ID: %d). Writing %zu bytes to disk...\n", new_id, record_size);
+    printf("[TRACE] append_record (PID: %d): File Write — appending record (new ID: %d, %zu bytes) to '%s'...\n",
+           getpid(), new_id, record_size, filename);
     fflush(stdout);
 
     fwrite(record, record_size, 1, f);
-    printf("[TRACE] append_record: Record written successfully to '%s'.\n", filename);
+
+    // --- Release lock ---
+    printf("[TRACE] append_record (PID: %d): Write complete. Releasing EXCLUSIVE lock on '%s'.\n", getpid(), filename);
     fflush(stdout);
+    flock(fileno(f), LOCK_UN);
     fclose(f);
+
+    printf("[TRACE] append_record (PID: %d): Record appended successfully to '%s'.\n", getpid(), filename);
+    fflush(stdout);
     return new_id;
 }
 
@@ -110,13 +138,18 @@ void log_event(const char *level, const char *format, ...) {
     vsnprintf(message_buffer, sizeof(message_buffer), format, args);
     va_end(args);
 
-    // 3. Print to the Server Terminal (so you can see it live!)
-    printf("[%s] [%s] %s\n", time_str, level, message_buffer);
+    // 3. Print to the Server Terminal
+    printf("[%s] [%s] (PID: %d) %s\n", time_str, level, getpid(), message_buffer);
+    fflush(stdout);
 
-    // 4. Save to the permanent log file
+    // 4. Save to the permanent log file with exclusive lock for process safety
     FILE *log_file = fopen("server.log", "a");
     if (log_file) {
-        fprintf(log_file, "[%s] [%s] %s\n", time_str, level, message_buffer);
+        printf("[TRACE] log_event (PID: %d): Acquiring EXCLUSIVE lock on server.log...\n", getpid());
+        fflush(stdout);
+        flock(fileno(log_file), LOCK_EX);
+        fprintf(log_file, "[%s] [%s] (PID: %d) %s\n", time_str, level, getpid(), message_buffer);
+        flock(fileno(log_file), LOCK_UN);
         fclose(log_file);
     } else {
         printf("[!] CRITICAL: Could not open server.log for writing!\n");
